@@ -5,6 +5,7 @@ import pickle
 import time
 import pygame
 import sys
+from colorama import Fore
 import threading as th
 
 #Internal Values
@@ -16,17 +17,18 @@ previousnode = 0
 mapdata = {}
 currpadCoords = 0
 startingpadCoords = 3
+previousBranchedNode = 0
 
 #Settings
-distancefromwall = 700 #mm
-aligningDistance = 25 #cm
-tooClose = 150
+distancefromwall = 700 #mm (at which point is it counted as a wall )
+tooClose = 170 #mm (at which point is the wall too close? for wall adjustment)
 moveDistance = 55 #ctm
 sensortime = 0.5 #secs
 rottime = 1 #secs
 aligningTime = 1 #secs
 maxheight = 85 #cm
 minheight = 75 #cm
+pauseTime = 3
 horizontalAligningSpeed = 10 #cm/s
 verticalAligningSpeed = 30 #cm/s
 MAPFILEPATH = r'C:\Users\delay\OneDrive\Documents\Code & Programs\Visual Studio Code\YDSP\DSTA-YDSP\mapgraph.txt'
@@ -35,7 +37,7 @@ MAPDATAPATH = r"C:\Users\delay\OneDrive\Documents\Code & Programs\Visual Studio 
 #Discontinued
 padHeightDiffAllowance = 40 
 maintainheightupdatefreq = 5
-
+aligningDistance = 25 #cm (for alignMiddle())
 
 #Initialisation
 print("[SETUP] Setting Up...")
@@ -68,15 +70,15 @@ def stopMovement():
     t.send_rc_control(0,0,0,0)
     
 def maintainHeight():
-    print(f"[HEIGHT] 70cm")
     currentheight = t.get_height()
-    desiredheight = (maxheight + minheight)/2
-    #print(currentheight)
-    
+    print(f"[HEIGHT] Maintaining Height Range: {minheight}cm - {maxheight}cm")
+
     if currentheight > maxheight:
+        print(f"[HEIGHT] Too High | Diff: {currentheight - maxheight}")
         t.send_rc_control(0, 0, -verticalAligningSpeed, 0)
         
     if currentheight < minheight:
+        print(f"[HEIGHT] Too Low | Diff: {minheight - currentheight}")
         t.send_rc_control(0, 0, verticalAligningSpeed, 0)
         
     stop = th.Timer(2, stopMovement)
@@ -98,50 +100,6 @@ def maintainHeight():
     '''
     #mh = th.Timer(maintainheightupdatefreq, maintainHeight)
     #mh.start()  
-    
-def aligntoPad():
-    padCoords = getPadCoordinates()
-    if padCoords != [-100, -100, -100]:
-        x = padCoords[0]
-        y = padCoords[1]
-        z = padCoords[2]
-        
-        print(f"[PAD] Starting Alignment at: {padCoords}")
-        x = 0
-        #Aligning to X Axis
-        while x < 0 and x <= 10:
-            print("[PAD] Left Alignment")
-            t.send_rc_control(-horizontalAligningSpeed, 0, 0, 0)
-            #stop = th.Timer(1, stopMovement)
-            #stop.start()
-            x +=1
-        x = 0
-        while x > 0 and x <= 10:
-            t.send_rc_control(horizontalAligningSpeed, 0, 0, 0)
-            print("[PAD] Right Alignment")
-            #stop = th.Timer(1, stopMovement)
-            #stop.start()
-            x +=1
-        x = 0
-        while y < 0 and x <= 10:
-            t.send_rc_control(0, -horizontalAligningSpeed, 0, 0)
-            print("[PAD] Backward Alignment")
-            #stop = th.Timer(1, stopMovement)
-            #stop.start()
-            x +=1
-        x = 0
-        while y > 0 and x <= 10:
-            t.send_rc_control(0, horizontalAligningSpeed, 0, 0)
-            print("[PAD] Forward Alignment")
-            #stop = th.Timer(1, stopMovement)
-            #stop.start()
-            x +=1
-        x = 0
-        stopMovement()
-        print(f"[PAD] Finishing Alignment at: {padCoords}")
-        
-    else:
-        print("[PAD] Pad not Detected!")  
 
 def yawRight90():
     global orientation
@@ -181,12 +139,15 @@ def yawLeft90():
     t.rotate_counter_clockwise(90)
     print(f"[YAW] Left 90 | Origin: {origin} | Final: {orientation}")
 
-def updatePadID(backwards=False):
+def updatePadID(backwards=False): #updating padID will also update the previous node
     global currpadCoords
     global orientation
+    global previousnode
+    
+    previousnode = currpadCoords
     
     if backwards == True:
-        print(f"[PAD] Backwards is True!")
+        #print(f"[PAD] Backwards is True!")
         if orientation == "N":
             print(f"[PAD] Old PadID: {currpadCoords} | New PadID: {currpadCoords - 5}")
             currpadCoords -= 5
@@ -219,150 +180,146 @@ def updatePadID(backwards=False):
         elif orientation == "W":
             print(f"[PAD] Old PadID: {currpadCoords} | New PadID: {currpadCoords - 1}")
             currpadCoords -= 1
-        
-    
+
+    print(f"[DEBUG] Check: Previous Node should be DIFFERENT from new node!")
+    print(f"[PAD] Updated PadCoord | Previous Node: {previousnode} | New Node: {currpadCoords}")
+
 def backTrack():
     global orientation
     global inAir
-    global previousnode
-    global mapdata
+    global mapdata #Currently mapped data 
     global currpadCoords
-    global mapdata
+    global previousnode
     
+    print("\n[BACK] No Direction Available, Moving back...")
     t.move_back(moveDistance)
     updatePadID(backwards=True)
     
-    padData = getPadInfo()
-    cont = True
-    minicont = True
-    
-    while cont:
-        print("\n")
-        while minicont:
-            padData = getPadInfo()
-            minicont = False
-            #insert if pad not detected try again & align code
-            #str(padInfo.get("id")), type=padInfo.get("type"), bl=branchleft, br = branchright, mn = currentmove, o = orientation, m = action, lmove = <truefalse>
-            padID = padData.get("id")
-            print(f"[DEBUG] BACK PadID: {padID}")
-
-            try:
-                nodedata = mapdata.get(padID)
-                BLbranch = nodedata.get("bl")
-                BRbranch = nodedata.get("br")
-                BFbranch = nodedata.get("bf")
-                nodeOrient = nodedata.get("o")
-                nodeAction = nodedata.get("m")
-                nodeLeftMoved = nodedata.get('lmove') #if it has been to left, True, else false
-                nodeRightMoved = nodedata.get("rmove") #if it has been to right, True, else false
-                nodeForwardMoved = nodedata.get("fmove")
-                
-            except AttributeError:
-                print("[BACK] Not Mapped, Exiting.")
-                cont = False
-                minicont = False
-                break
+    while True:
+        padData = getPadInfo()
+        padCoord = padData.get("id")
+        print(f"\n[BACK] Pad Number: {padCoord}")
+        print(f"\n[BACK] Checking if pad is mapped...")
+        
+        try: #try to get pad data 
+            nodedata = mapdata.get(padCoord)
+            BLbranch = nodedata.get("bl")
+            BRbranch = nodedata.get("br")
+            BFbranch = nodedata.get("bf")
+            nodeOrient = nodedata.get("o")
+            nodeAction = nodedata.get("m")
+            nodeLeftMoved = nodedata.get('lmove') #if it has been to left, True, else false
+            nodeRightMoved = nodedata.get("rmove") #if it has been to right, True, else false
+            nodeForwardMoved = nodedata.get("fmove")
             
-            if nodeOrient != orientation: #First change orientation if not in correct orientation
-                print(f"[DEBUG] Original Orientation: {nodeOrient} | Current: {orientation} | Action: {nodeAction}")
+        except AttributeError: #if there is no pad data, exit loop
+            print(f"[BACK] Pad is not Mapped, exiting!")
+            #mapping & connecting edge is for main() AS you have to read the current node first!
+            break
+        
+        print(f"[BACK] Pad is already mapped... Back Tracking...")
+        
+        #Auto-Orientation
+        if nodeOrient != orientation:
+            print(f"[BACK] Changing Orientation to Desired Orientation!")
+            print(f"[DEBUG] Desired Orientation: {nodeOrient} | Current: {orientation} | Action: {nodeAction}")
+            
+            if nodeAction == "l":
+                print(f"[DEBUG] Original Node Action: {nodeAction}")
+                yawRight90()
+                print(f"[BACK] Desired Orientation: {nodeOrient} |  Final: {orientation}")
                 
-                if nodeAction == "l":
-                    print(f"[DEBUG] Original Node Action: {nodeAction}")
-                    yawRight90()
-                    print(f"[BACK] Desired Orientation: {nodeOrient} |  Final: {orientation}")
-                    
-                elif nodeAction == "r":
-                    print(f"[DEBUG] Original Node Action: {nodeAction}")
-                    yawLeft90()
-                    print(f"[BACK] Desired Orientation: {nodeOrient} |  Final: {orientation}")
-                
-                '''
-                else:
-                    print(f"[BACK] Error! Orientation not matching original node??\n")
-                    t.land()
-                    inAir = False
-                '''    
+            elif nodeAction == "r":
+                print(f"[DEBUG] Original Node Action: {nodeAction}")
+                yawLeft90()
+                print(f"[BACK] Desired Orientation: {nodeOrient} |  Final: {orientation}")
                 
             else:
-                print(f"[BACK] Desired Orientation already reached!")
+                print(Fore.RESET + Fore.RED + "[ERROR] Orientation is not synced properly! \n" + Fore.RESET)
+        
+        else:
+            print(f"[BACK] Desired Orientation already reached!")
+
+        #Back Tracking Movement
+        if BLbranch == False and BRbranch == False: #if there is no right or left branch, move back
+            print("[BACK] No Node Branches Available")
+            print("[BACK] Moving Back")
             
-            #If there are no branches
-            if (BLbranch == False and BRbranch == False and BFbranch == False):
-                print("[BACK] No Node Branches Available")
-                print("[BACK] Moving Back")
-                previousnode = padID
+            t.move_back(moveDistance)
+            updatePadID(backwards=True)
+            time.sleep(pauseTime)
+            
+        elif BLbranch == False and BRbranch == True: #if there is a right branch
+            print("[BACK] 1 Node Branch Available: Right Branch")
+            if nodeRightMoved == True: #if already moved right, move back instead
+                print("[BACK] Already Moved Right, Moving back instead! (are you sure this should happen?)")
                 t.move_back(moveDistance)
                 updatePadID(backwards=True)
-                time.sleep(4)
-                minicont = True
-            
-            #if there is only one branch 
-            elif (BLbranch == True and BRbranch == False and BFbranch == True) or (BLbranch == False and BRbranch == True and BFbranch == True):
-            #go pack to previous orientation and move back (it should already be in the desired orientation)
-                print("[BACK] Node Branches Available: 1")
+                time.sleep(pauseTime)
                 
-                if (BRbranch == True):
-                    yawRight90()
-                    t.move_forward(moveDistance)
-                    updatePadID(backwards=False)
-                    time.sleep(4)
-                    minicont = True
-                    cont = True
-                    
-                elif (BFbranch == True):
-                    yawLeft90()
-                    t.move_forward(moveDistance)
-                    updatePadID(backwards=False)
-                    time.sleep(4)
-                    minicont = True
-            
-            #if there are two branches
-            elif BLbranch == True and BRbranch == True and BFbranch == True:
-                #[DONE] remember to code it such that it also remembers if it has done left and right and instead now go straight
-                #get orientation and previous action? prolly go back to original orientation and do the opposite of previous action
-                print("[BACK] Node Branches Available: 2")
-                #turn left (left priority)
-                previousnode = padID
+            else: #else, move to the right
+                print("[BACK] Moving to the Right...")
+                yawRight90()
+                t.move_forward(moveDistance)
+                updatePadID(backwards=False)
+                time.sleep(pauseTime)
                 
-                if nodeLeftMoved == False:
-                    print(f"[BACK] Moving Left...")
-                    yawLeft90()
-                    t.move_forward(moveDistance)
-                    updatePadID()
-                    cont = False
-                    time.sleep(4)
-                    minicont = True
-                    
-                elif nodeLeftMoved == True and nodeRightMoved == False:
-                    print(f"[BACK] Left already mapped, Moving Right...")
-                    yawRight90()
-                    t.move_forward(moveDistance)
-                    updatePadID()
-                    cont = False
-                    time.sleep(4)
-                    minicont = False
-                    
-                #you dont need a nodeLeftMoved = False and nodeRightMoved = True as you already have left priority
-                else:
-                    print(f"[BACK] Left and Right already mapped, Moving Back...")
-                    t.move_back(moveDistance)  
-                    updatePadID(backwards=True)      
-                    
-            else:
-                print("[ERROR] you did not account for one of the options ")
-                    
-        #checking if mapped
-        check = mapdata.get(currpadCoords)
-        
-        if check == None:
-            print(f"[BACK] Current Pad is Unmapped, stopping backtracking!")
-            cont = False
-            minicont = False
-            break
-            
-        else:
-            pass
+        elif BLbranch == True and BRbranch == False: #If there is a left branch
+            print("[BACK] 1 Node Branch Available: Left Branch")
+            if nodeLeftMoved == True: #if already moved left, move back instead
+                print("[BACK] Already Moved Left, Moving back instead! (are you sure this should happen?)")
+                t.move_back(moveDistance)
+                updatePadID(backwards=True)
+                time.sleep(pauseTime)
                 
+            else: #else, move to the left
+                print("[BACK] Moving to the Left...")
+                yawLeft90()
+                t.move_forward(moveDistance)
+                updatePadID(backwards=False)
+                time.sleep(pauseTime)
+                
+        elif BLbranch == True and BRbranch == True: #If there are two branches
+            print("[BACK] 2 Node Branches Available: Left & Right Branch")
+            
+            if nodeRightMoved == True and nodeLeftMoved == True: #If you already moved through both branches
+                print("[BACK] Already Moved Left & Right, Moving back instead! (are you sure this should happen?)")
+                t.move_back(moveDistance)
+                updatePadID(backwards=True)
+                time.sleep(pauseTime)
+            
+            elif nodeLeftMoved == False: #Left priority, if havent been through left node, go to right node
+                print("[BACK] Moving to the Left...")
+                
+                editNodeData = mapdata[padCoord]
+                editNodeData["lmove"] = True
+                print(f"[DEBUG] Check: lmove should be True | {mapdata}")
+                
+                yawLeft90()
+                t.move_forward(moveDistance)
+                updatePadID(backwards=False)
+                time.sleep(pauseTime)
+                
+            elif nodeRightMoved == False and nodeLeftMoved == True: #If left has been moved through but right hasnt, go through right node
+                print("[BACK] Already Moved to the Left, Moving Right instead! (are you sure this is supposed to happen?)")
+                
+                editNodeData = mapdata[padCoord]
+                editNodeData["rmove"] = True
+                print(f"[DEBUG] Check: rmove should be True | {mapdata}")
+                
+                yawRight90()
+                t.move_forward(moveDistance)
+                updatePadID(backwards=False)
+                time.sleep(pauseTime)
+                
+            else: #Error...
+                print(Fore.RESET + Fore.RED + "[ERROR] Back Track error! Landing to avoid messing up the map!" + Fore.RESET)
+                t.land()
+                inAir = False
+                break
+         
+        #no need for mapping as it is backtracking already mapped areas!
+ 
 def getTOF():
     global inAir 
     data_return = t.send_command_with_return('EXT tof?')
@@ -404,29 +361,15 @@ def getPadInfo():
         #write code for aligning
 
 def align():
-    print("[ALIGN] Aligning")
-    walls = getWalls()
+    sensorvalue = getTOF()
+    if sensorvalue > distancefromwall:
+        print("[ALIGN] No wall detected in front, can't align!")
     
-    if walls[0] == True:
-        print("[ALIGN] Aligning with Front wall")
-        t.send_rc_control(0, horizontalAligningSpeed, 0, 0)
-        time.sleep(3)
-        t.move_back(30)
-        
-    elif walls[1] == True:
-        print("[ALIGN] Aligning with Left wall")
-        t.send_rc_control(-horizontalAligningSpeed, 0, 0, 0)
-        time.sleep(3)
-        t.move_back(30)
-        
-    elif walls[2] == True:
-        print("[ALIGN] Aliging with Right wall")
-        t.send_rc_control(horizontalAligningSpeed, 0, 0, 0, 0)
-        time.sleep(3)
-        t.move_back(30)
-        
     else:
-        print("[ALIGN] No wall to align with.")
+        print("[ALIGN] Aligning with front wall...")
+        t.send_rc_control(0, horizontalAligningSpeed, 0, 0)
+        time.sleep(2)
+        stopMovement()
 
 def getWalls():
     leftwall = False
@@ -450,9 +393,8 @@ def getWalls():
         t.move_back(20)
         time.sleep(aligningTime)
         
-    
     yawRight90()
-    time.sleep(0.3)
+    time.sleep(0.1)
     yawRight90() 
     time.sleep(rottime)
     rightvalue = getTOF()
@@ -573,19 +515,20 @@ def main():
     lmove = False
     rmove = False
     fmove = False
+    deadEnd = False
+    
     currorientation = orientation
     battLev = t.get_battery()
     nodedata = {}
-    previousnode = currpadCoords
     
     #Run
-    print(f"\n[INFO] Move {currentmove} | Height {t.get_height()}cm | Orientation {orientation} | Battery {battLev}%")
+    print(f"\n[MAIN] Move {currentmove} | Height {t.get_height()}cm | Orientation {orientation} | Battery {battLev}%")
     maintainHeight()
     
     #Getting Information
     walls = getWalls()
     padInfo = getPadInfo()
-    print(f"[INFO] PAD | {padInfo}")
+    print(f"[PAD] {padInfo}")
         
     if walls[0] == False:
         branchforward = True
@@ -603,8 +546,12 @@ def main():
         branchright = False
     
     if padInfo == None:
-        print("[PAD] Not Detected, Adjusting Height!")
+        print(Fore.RESET + Fore.RED + "[PAD] Pad Not Detected, Adjusting Height!" + Fore.RESET)
         maintainHeight()
+        
+        if getTOF() < tooClose:
+            t.move_back(20)
+        
         #align code
         
         time.sleep(5)
@@ -616,6 +563,8 @@ def main():
     
     else: #if pad is found
         if walls[0] == True and walls[1] == True and walls[2] == True: #If there is no available path except backwards
+            deadEnd = True
+            
             nodedata["id"] = currpadCoords
             nodedata["type"] = padInfo.get("type")
             nodedata["bl"] = branchleft
@@ -626,9 +575,10 @@ def main():
             nodedata["lmove"] = lmove
             nodedata["rmove"] = rmove
             nodedata["bf"] = branchforward
+            nodedata["deadend"] = deadEnd
             
             mapdata[nodedata["id"]] = nodedata
-            map.add_node(nodedata["id"], type=nodedata["type"], bl=nodedata["bl"], br = nodedata["mn"], mn = nodedata["mn"], o = nodedata["o"], m = nodedata["m"], lmove = nodedata["lmove"], rmove = nodedata["rmove"], bf=branchforward)
+            map.add_node(nodedata["id"], type=nodedata["type"], bl=nodedata["bl"], br = nodedata["mn"], mn = nodedata["mn"], o = nodedata["o"], m = nodedata["m"], lmove = nodedata["lmove"], rmove = nodedata["rmove"], bf=nodedata["bf"], deadend = nodedata["deadend"])
             backTrack()
             
         elif walls[0] == False: 
@@ -747,14 +697,13 @@ def main():
         nodedata["lmove"] = lmove
         nodedata["rmove"] = rmove
         nodedata["bf"] = branchforward
+        nodedata["deadend"] = deadEnd
         
         mapdata[nodedata["id"]] = nodedata
-        map.add_node(nodedata["id"], type=nodedata["type"], bl=nodedata["bl"], br = nodedata["mn"], mn = nodedata["mn"], o = nodedata["o"], m = nodedata["m"], lmove = nodedata["lmove"], rmove = nodedata["rmove"], bf=branchforward)
+        map.add_node(nodedata["id"], type=nodedata["type"], bl=nodedata["bl"], br = nodedata["mn"], mn = nodedata["mn"], o = nodedata["o"], m = nodedata["m"], lmove = nodedata["lmove"], rmove = nodedata["rmove"], bf=nodedata["bf"],deadend = nodedata["deadend"] )
         
         #getting new padID
-        updatePadID()
-        
-        
+        updatePadID()    
         
         print(f"[DEBUG] Previous NodeID: {previousnode}")
         map.add_edge(previousnode, currpadCoords)

@@ -18,9 +18,11 @@ mapdata = {}
 currpadCoords = 0
 startingpadCoords = 3
 previousBranchedNode = 0
+backTracked = False
+specialLocations = {}
 
 #Settings
-distancefromwall = 700 #mm (at which point is it counted as a wall )
+distancefromwall = 700 #mm (at which point is it counted as a wall ) might need to change it to 650 for competition
 tooClose = 170 #mm (at which point is the wall too close? for wall adjustment)
 moveDistance = 55 #ctm
 sensortime = 0.5 #secs
@@ -33,6 +35,7 @@ horizontalAligningSpeed = 10 #cm/s
 verticalAligningSpeed = 30 #cm/s
 MAPFILEPATH = r'C:\Users\delay\OneDrive\Documents\Code & Programs\Visual Studio Code\YDSP\DSTA-YDSP\mapgraph.txt'
 MAPDATAPATH = r"C:\Users\delay\OneDrive\Documents\Code & Programs\Visual Studio Code\YDSP\DSTA-YDSP\mapdata.txt"
+LOCATIONPATH = r"C:\Users\delay\OneDrive\Documents\Code & Programs\Visual Studio Code\YDSP\DSTA-YDSP\speciallocations.txt"
 
 #Discontinued
 padHeightDiffAllowance = 40 
@@ -52,6 +55,7 @@ pygame.display.set_caption('Tello Command Centre')
 pygame.mouse.set_visible(0)
 map = nx.Graph()
 currpadCoords = startingpadCoords
+previousnode = startingpadCoords
 print(f"[SETUP] Setup OK. Battery: {battLev}%")
 
 
@@ -191,6 +195,8 @@ def backTrack():
     global currpadCoords
     global previousnode
     
+    currorientation = orientation
+    
     print("\n[BACK] No Direction Available, Moving back...")
     t.move_back(moveDistance)
     updatePadID(backwards=True)
@@ -217,7 +223,7 @@ def backTrack():
             #mapping & connecting edge is for main() AS you have to read the current node first!
             break
         
-        print(f"[BACK] Pad is already mapped... Back Tracking...")
+        print(f"[BACK] Pad is mapped, Back Tracking...")
         
         #Auto-Orientation
         if nodeOrient != orientation:
@@ -351,7 +357,7 @@ def getPadInfo():
         
         else:
             returndata["type"] = 'missionpad'
-            returndata["id"] = padID
+            returndata["id"] = int(padID)
         
         return returndata
         
@@ -509,6 +515,8 @@ def main():
     global previousnode
     global mapdata
     global currpadCoords
+    global backTracked
+    global specialLocations
     
     action = ""
     actionCompleted = False
@@ -525,205 +533,294 @@ def main():
     print(f"\n[MAIN] Move {currentmove} | Height {t.get_height()}cm | Orientation {orientation} | Battery {battLev}%")
     maintainHeight()
     
-    #Getting Information
-    walls = getWalls()
-    padInfo = getPadInfo()
-    print(f"[PAD] {padInfo}")
+    try:
+        mapdata[currpadCoords]
+        print(f"[MAIN] Pad {currpadCoords} is already mapped! (are you sure this is supposed to happen?)")
+        mapped = True
         
-    if walls[0] == False:
-        branchforward = True
-    else:
-        branchforward = False
-        
-    if walls[1] == False:
-        branchleft = True
-    else:
-        branchleft = False
-        
-    if walls[2] == False:
-        branchright = True
-    else:
-        branchright = False
+    except KeyError:
+        print(f"[MAIN] Pad {currpadCoords} is not mapped yet!")
+        mapped = False
     
-    if padInfo == None:
-        print(Fore.RESET + Fore.RED + "[PAD] Pad Not Detected, Adjusting Height!" + Fore.RESET)
-        maintainHeight()
-        
-        if getTOF() < tooClose:
-            t.move_back(20)
-        
-        #align code
-        
-        time.sleep(5)
+    if mapped == False:
+        #Getting Information
+        walls = getWalls()
         padInfo = getPadInfo()
+        print(f"[PAD] {padInfo}")
+        
+        #Identify if MissionPad!
+        if padInfo.get("type") == "missionpad":
+            if padInfo.get("id") == 1:
+                print(Fore.RESET + Fore.GREEN + "[PAD] Drone is at the Start." + Fore.RESET)
+                
+            elif padInfo.get("id") == 2:
+                print(Fore.RESET + Fore.GREEN + "[PAD] Drone is at the End! Landing..." + Fore.RESET)
+                file = open(LOCATIONPATH, "a+")
+                file.write(f"\n")
+                file.write(str(specialLocations))
+                file.close()
+                
+                nodedata["id"] = currpadCoords
+                nodedata["type"] = "missionpad"
+                mapdata[nodedata["id"]] = nodedata #adding 
+                
+                print(Fore.RESET+Fore.GREEN+f"[MAP] Connecting node {previousnode} with node {currpadCoords}!"+Fore.RESET)
+                map.add_node(currpadCoords, type=nodedata["type"])
+                map.add_edge(previousnode, currpadCoords)
+                
+                subax1 = plt.subplot(221)  
+                nx.draw(map, with_labels = True, font_weight='bold')
+                plt.show(block=False)
+                
+                mapfile = open(MAPFILEPATH, 'wb')
+                pickle.dump(map, mapfile)
+                mapfile.close()
+                
+                mapdatafile = open(MAPDATAPATH, "w")
+                mapdatafile.write(str(mapdata))
+                mapdatafile.close()
+                    
+                t.move_forward()
+                t.land()
+                inAir = False
+            
+            else:
+                print("[PAD] Special Pad detected! Mission Pad")
+                specialLocations[currpadCoords] = padInfo.get("id") #Store as dictionary with node as identifier
+                print(f"[PAD] Special Locations Found: {specialLocations}")
+                
+                
+        if walls[0] == False:
+            branchforward = True
+        else:
+            branchforward = False            
+        if walls[1] == False:
+            branchleft = True
+        else:
+            branchleft = False        
+        if walls[2] == False:
+            branchright = True
+        else:
+            branchright = False
         
         if padInfo == None:
-            t.land()
-            inAir = False
-    
-    else: #if pad is found
-        if walls[0] == True and walls[1] == True and walls[2] == True: #If there is no available path except backwards
-            deadEnd = True
+            print(Fore.RESET + Fore.RED + "[PAD] Pad Not Detected, Adjusting Height!" + Fore.RESET)
+            maintainHeight()
             
-            nodedata["id"] = currpadCoords
-            nodedata["type"] = padInfo.get("type")
-            nodedata["bl"] = branchleft
-            nodedata["br"] = branchright
-            nodedata["mn"] = currentmove
-            nodedata["o"] = currorientation
-            nodedata["m"] = action
-            nodedata["lmove"] = lmove
-            nodedata["rmove"] = rmove
-            nodedata["bf"] = branchforward
-            nodedata["deadend"] = deadEnd
+            if getTOF() < tooClose:
+                t.move_back(20)
             
-            mapdata[nodedata["id"]] = nodedata
-            map.add_node(nodedata["id"], type=nodedata["type"], bl=nodedata["bl"], br = nodedata["mn"], mn = nodedata["mn"], o = nodedata["o"], m = nodedata["m"], lmove = nodedata["lmove"], rmove = nodedata["rmove"], bf=nodedata["bf"], deadend = nodedata["deadend"])
-            backTrack()
+            #align code
             
-        elif walls[0] == False: 
-            if getNextOrientation(action) == "N": #If there is no front wall and going forward in N direction 
-                print("[NAVI] Moving Forward")
-                action = "f"
-                t.move_forward(moveDistance)
-                actionCompleted = True
+            time.sleep(5)
+            padInfo = getPadInfo()
             
-            else: #Check for alternative actions
-                #Check if any other actions are going N
-                if (walls[1] == False and getNextOrientation("l") == "N"): #if no left walls and left turn = N
-                    print("[NAVI] Moving Left instead of Forward")
-                    action = "l"
-                    yawLeft90()
-                    t.move_forward(moveDistance)
-                    actionCompleted = True
+            if padInfo == None:
+                t.land()
+                inAir = False
+        
+        else: #if pad is found
+            if walls[0] == True and walls[1] == True and walls[2] == True: #If there is a front, left, and right wall, it is a deadend
+                deadEnd = True
 
-                elif (walls[2] == False and getNextOrientation("r") == "N"): #if no right walls and right turn = N
-                    print("[NAVI] Moving Right instead of Forward")
-                    action = "r"
-                    yawRight90()
-                    t.move_forward(moveDistance)
-                    actionCompleted = True
-                
-                #Check if any other actions are NOT N
-                elif walls[0] == False and getNextOrientation("f") != "S":
+            elif walls[0] == False: #else if there is no front wall and going forward results in a N orientation
+                if getNextOrientation("f") == "N":
                     print("[NAVI] Moving Forward")
                     action = "f"
                     t.move_forward(moveDistance)
+                    updatePadID() 
                     actionCompleted = True
                 
-                elif walls[1] == False and getNextOrientation("l") != "S": #if no left walls and left turn != S
-                    print("[NAVI] Moving Left instead of Forward")
-                    action = "l"
-                    yawLeft90()
-                    t.move_forward(moveDistance)
-                    actionCompleted = True
-                    
-                elif walls[2] == False and getNextOrientation("r") != "S": #if no right walls and right turn != S
-                    print("[NAVI] Moving Right instead of Forward")
-                    action = "r"
-                    yawRight90()
-                    t.move_forward(moveDistance)
-                    actionCompleted = True   
-                    
-                else:
-                    print("[NAVI] Moving Forward")
-                    action = "f"
-                    t.move_forward(moveDistance)
-                    actionCompleted = True
-                
-        else: 
-            if walls[1] == False: #If there is a front wall but no left wall
-                action = "l"
-                if getNextOrientation(action) == "N": #If turning left will result in a N direction, continue
-                    print("[NAVI] Moving Left")
-                    yawLeft90()
-                    t.move_forward(moveDistance)
-                    actionCompleted = True
-                    
-                else: #Find other alternatives
-                    if (walls[2] == False and getNextOrientation("r") == "N"): #If turning right will result in a N direction
-                        action = 'r'
-                        print("[NAVI] Moving Right instead of Left")
-                        yawRight90()
-                        t.move_forward(moveDistance)
-                        actionCompleted = True
-                        
-                    elif (walls[1] == False and getNextOrientation("l") != "S"): #If turning left will result in a non S direction
+                else: #Check for alternative actions
+                    #Check if any other actions are going N
+                    if (walls[1] == False and getNextOrientation("l") == "N"): #if no left walls and left turn = N
+                        print("[NAVI] Moving Left instead of Forward")
                         action = "l"
-                        print("[NAVI] Moving Left")
                         yawLeft90()
                         t.move_forward(moveDistance)
+                        updatePadID()
                         actionCompleted = True
-                        
-                    elif (walls[2] == False and getNextOrientation("r") != "S"):#If turning right will result in a non S direction
-                        action = 'r'
-                        print("[NAVI] Moving Right instead of Left")
+
+                    elif (walls[2] == False and getNextOrientation("r") == "N"): #if no right walls and right turn = N
+                        print("[NAVI] Moving Right instead of Forward")
+                        action = "r"
                         yawRight90()
                         t.move_forward(moveDistance)
+                        updatePadID()
                         actionCompleted = True
-                        
-                    else: #No choice but to move left
+                    
+                    #Check if any other actions are NOT N
+                    elif walls[0] == False and getNextOrientation("f") != "S":
+                        print("[NAVI] Moving Forward")
+                        action = "f"
+                        t.move_forward(moveDistance)
+                        updatePadID()
+                        actionCompleted = True
+                    
+                    elif walls[1] == False and getNextOrientation("l") != "S": #if no left walls and left turn != S
+                        print("[NAVI] Moving Left instead of Forward")
                         action = "l"
-                        print("[NAVI] Moving Left")
                         yawLeft90()
                         t.move_forward(moveDistance)
+                        updatePadID()
                         actionCompleted = True
+                        
+                    elif walls[2] == False and getNextOrientation("r") != "S": #if no right walls and right turn != S
+                        print("[NAVI] Moving Right instead of Forward")
+                        action = "r"
+                        yawRight90()
+                        t.move_forward(moveDistance)
+                        updatePadID()
+                        actionCompleted = True   
+                        
+                    else:
+                        print(Fore.RESET + Fore.RED + "[NAVI] Unintentional, watch out! Moving Forward" + Fore.RESET)
+                        action = "f"
+                        t.move_forward(moveDistance)
+                        updatePadID()
+                        actionCompleted = True
+                    
+            else: #If there is a front wall
+                if walls[1] == False: #If there is a front wall but no left wall
+                    if getNextOrientation("l") == "N": #If turning left will result in a N direction, continue
+                        print("[NAVI] Moving Left")
+                        action = "l"
+                        yawLeft90()
+                        t.move_forward(moveDistance)
+                        updatePadID()
+                        actionCompleted = True
+                        
+                    else: #Find other alternatives
+                        if (walls[2] == False and getNextOrientation("r") == "N"): #if there is no right wall and turning right will result in a N direction
+                            action = 'r'
+                            print("[NAVI] Moving Right instead of Left")
+                            yawRight90()
+                            t.move_forward(moveDistance)
+                            updatePadID()
+                            actionCompleted = True
                             
-            else: #If there is no front wall and left wall...
-                if walls[2] == False:
-                    print("[NAVI] Moving Right")
-                    action = "r"
-                    yawRight90()
-                    t.move_forward(moveDistance)
-              
-        if action == "l":
-            lmove = True     
-            print(f"[DEBUG] Left Move: {lmove}")
+                        elif (walls[1] == False and getNextOrientation("l") != "S"): #If turning left will result in a non S direction
+                            action = "l"
+                            print("[NAVI] Moving Left")
+                            yawLeft90()
+                            t.move_forward(moveDistance)
+                            updatePadID()
+                            actionCompleted = True
+                            
+                        elif (walls[2] == False and getNextOrientation("r") != "S"):#If turning right will result in a non S direction
+                            action = 'r'
+                            print("[NAVI] Moving Right instead of Left")
+                            yawRight90()
+                            t.move_forward(moveDistance)
+                            updatePadID()
+                            actionCompleted = True
+                            
+                        else: #No choice but to move left
+                            action = "l"
+                            print(Fore.RESET + Fore.RED + "[NAVI] Unintentional! Be Careful! Moving Left")
+                            yawLeft90()
+                            t.move_forward(moveDistance)
+                            updatePadID()
+                            actionCompleted = True
+                                
+                else: #If there is no front wall and left wall...
+                    if walls[2] == False:
+                        print("[NAVI] Moving Right")
+                        action = "r"
+                        yawRight90()
+                        t.move_forward(moveDistance)
+                        updatePadID()
             
-        elif action == "r":
-            rmove = True
-            print(f"[DEBUG] Right Move: {rmove}")
+            #Getting action data for mapping        
+            if action == "l":
+                lmove = True     
+                print(f"[DEBUG] Left Move: {lmove}")
+                
+            elif action == "r":
+                rmove = True
+                print(f"[DEBUG] Right Move: {rmove}")
+                
+            elif action == "f":
+                fmove = True   
             
-        elif action == "f":
-            fmove = True
+            if deadEnd == True:
+                nodedata["id"] = currpadCoords #since it is a deadend, updatePadID will not be called yet
+                nodedata["type"] = padInfo.get("type")
+                nodedata["bl"] = branchleft #TF
+                nodedata["br"] = branchright #TF
+                nodedata["mn"] = currentmove #INT
+                nodedata["o"] = currorientation #STR (the initial orientation before the action)
+                nodedata["m"] = action #STR
+                nodedata["lmove"] = lmove #TF
+                nodedata["rmove"] = rmove #TF
+                nodedata["bf"] = branchforward #TF
+                nodedata["deadend"] = deadEnd #TF
+                
+                mapdata[nodedata["id"]] = nodedata #adding 
+                map.add_node(nodedata["id"], type=nodedata["type"], bl=nodedata["bl"], br = nodedata["mn"], mn = nodedata["mn"], o = nodedata["o"], m = nodedata["m"], lmove = nodedata["lmove"], rmove = nodedata["rmove"], bf=nodedata["bf"],deadend = nodedata["deadend"])       
+                
+                backTrack()
+                deadEnd = False
+                backTracked = True
+                
+                print(Fore.RESET+Fore.GREEN+f"[MAP] Connecting node {previousnode} with node {currpadCoords}!"+Fore.RESET)
+                map.add_edge(previousnode, currpadCoords) #branched node will be stored as previousnode after backTrack
+
+            else: #if it isnt a deadend
+                #Mapping previous nodedata (after travelling)
+                nodedata["id"] = previousnode #updatePadID wouldve been called, hence use previousnode value instead...
+                nodedata["type"] = padInfo.get("type")
+                nodedata["bl"] = branchleft #TF
+                nodedata["br"] = branchright #TF
+                nodedata["mn"] = currentmove #INT
+                nodedata["o"] = currorientation #STR (initial orientation before it left the pad)
+                nodedata["m"] = action #STR
+                nodedata["lmove"] = lmove #TF
+                nodedata["rmove"] = rmove #TF
+                nodedata["bf"] = branchforward #TF
+                nodedata["deadend"] = deadEnd #TF #should be false
+                
+                #adding to the mapdata dictionary
+                mapdata[nodedata["id"]] = nodedata 
+                
+                #adding to the graph
+                map.add_node(nodedata["id"], type=nodedata["type"], bl=nodedata["bl"], br = nodedata["mn"], mn = nodedata["mn"], o = nodedata["o"], m = nodedata["m"], lmove = nodedata["lmove"], rmove = nodedata["rmove"], bf=nodedata["bf"],deadend = nodedata["deadend"] )
+                
+                print(Fore.RESET+Fore.GREEN+f"[MAP] Connecting node {previousnode} with node {currpadCoords}!"+Fore.RESET)
+                map.add_edge(previousnode, currpadCoords) 
+                #apparently, you can connect the node with a nonexisting node sooooo
+            
+            subax1 = plt.subplot(221)  
+            nx.draw(map, with_labels = True, font_weight='bold')
+            plt.show()
+            
+            #Connect to previous node + other connecting code
+            #beenleft code (make it such that diff options add nodes with diff atrributes)
+            #remember to pickle dump!
+            mapfile = open(MAPFILEPATH, 'wb')
+            pickle.dump(map, mapfile)
+            mapfile.close()
+            
+            mapdatafile = open(MAPDATAPATH, "w")
+            mapdatafile.write(str(mapdata))
+            mapdatafile.close()
+            
+            currentmove += 1
+            
+    else:
+        #run already mapped code
         
-        nodedata["id"] = currpadCoords
-        nodedata["type"] = padInfo.get("type")
-        nodedata["bl"] = branchleft
-        nodedata["br"] = branchright
-        nodedata["mn"] = currentmove
-        nodedata["o"] = currorientation
-        nodedata["m"] = action
-        nodedata["lmove"] = lmove
-        nodedata["rmove"] = rmove
-        nodedata["bf"] = branchforward
-        nodedata["deadend"] = deadEnd
+        nodedata = mapdata.get(currpadCoords)
+        BLbranch = nodedata.get("bl")
+        BRbranch = nodedata.get("br")
+        BFbranch = nodedata.get("bf")
+        nodeOrient = nodedata.get("o")
+        nodeAction = nodedata.get("m")
+        nodeLeftMoved = nodedata.get('lmove') #if it has been to left, True, else false
+        nodeRightMoved = nodedata.get("rmove") #if it has been to right, True, else false
+        nodeForwardMoved = nodedata.get("fmove")
         
-        mapdata[nodedata["id"]] = nodedata
-        map.add_node(nodedata["id"], type=nodedata["type"], bl=nodedata["bl"], br = nodedata["mn"], mn = nodedata["mn"], o = nodedata["o"], m = nodedata["m"], lmove = nodedata["lmove"], rmove = nodedata["rmove"], bf=nodedata["bf"],deadend = nodedata["deadend"] )
-        
-        #getting new padID
-        updatePadID()    
-        
-        print(f"[DEBUG] Previous NodeID: {previousnode}")
-        map.add_edge(previousnode, currpadCoords)
-          
-        subax1 = plt.subplot(221)  
-        nx.draw(map, with_labels = True, font_weight='bold')
-        plt.show()
-        
-        #Connect to previous node + other connecting code
-        #beenleft code (make it such that diff options add nodes with diff atrributes)
-        #remember to pickle dump!
-        mapfile = open(MAPFILEPATH, 'wb')
-        pickle.dump(map, mapfile)
-        mapfile.close()
-        
-        mapdatafile = open(MAPDATAPATH, "w")
-        mapdatafile.write(str(mapdata))
-        mapdatafile.close()
-        
-        currentmove += 1
+        #see graph paths? 
         
 mainRun = False 
 def run():

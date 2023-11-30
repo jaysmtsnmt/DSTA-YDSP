@@ -18,16 +18,7 @@ plt.show()
 dataBL = nx.get_node_attributes(map, "bl")
 dataBR = nx.get_node_attributes(map, "br")
 
-mapnodes = map.nodes()
-for node in mapnodes:
-    print(node)
-    BRbranch = dataBL.get(node)
-    BLbranch = dataBR.get(node)
-    
-    #if BRbranch == True:
-        
 
-#print(map.nodes())
         
 
 

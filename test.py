@@ -27,7 +27,11 @@ print(nx.get_node_attributes(map, "br"))
 print(nx.get_node_attributes(map, "bl"))
 
 print(z)
-z[0]
+try:
+    z[0]
+
+except KeyError:
+    print("test")
 y = z[1]
 y["bl"] = True
 y["b0"] = True

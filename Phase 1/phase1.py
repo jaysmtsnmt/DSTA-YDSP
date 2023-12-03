@@ -14,17 +14,17 @@ battLev = 0
 orientation = "N"
 currentmove = 1
 previousnode = 0
-mapdata = {}
-currpadCoords = 0
+currpadCoords = 0 #CHECK
 startingpadCoords = 3
 previousBranchedNode = 0
 backTracked = False
-specialLocations = {}
+mapdata = {} #CHECK
+specialLocations = {} #CHECK
 
 #Settings
-distancefromwall = 700 #mm (at which point is it counted as a wall ) might need to change it to 650 for competition
+distancefromwall = 800 #mm (at which point is it counted as a wall ) might need to change it to 650 for competition
 tooClose = 170 #mm (at which point is the wall too close? for wall adjustment)
-moveDistance = 55 #ctm
+moveDistance = 57 #ctm
 sensortime = 0.5 #secs
 rottime = 1 #secs
 aligningTime = 1 #secs
@@ -53,11 +53,30 @@ pygame.init()
 screen = pygame.display.set_mode((640, 480))
 pygame.display.set_caption('Tello Command Centre')
 pygame.mouse.set_visible(0)
-map = nx.Graph()
 currpadCoords = startingpadCoords
 previousnode = startingpadCoords
-print(f"[SETUP] Setup OK. Battery: {battLev}%")
 
+map = nx.Graph()
+
+mapgraphfile = open(MAPFILEPATH, "rb")
+mapdatafile = open(MAPDATAPATH, "rb")
+specialLocationsfile = open(LOCATIONPATH, "rb")
+
+#map = pickle.load(mapgraphfile)
+#mapdata = pickle.load(mapdatafile)
+#specialLocations = pickle.load(specialLocationsfile)
+
+mapgraphfile.close()
+mapdatafile.close()
+specialLocationsfile.close()
+
+print(f"[LOAD] Loading data from file...")
+print(Fore.RESET + Fore.RED + f"[CHECK] Current Coordinate: {currpadCoords}" + Fore.RESET)
+print(f"[LOAD] Map: {nx.nodes(map)}")
+print(f"[LOAD] Map Data: {mapdata}")
+print(f"[LOAD] Locations: {specialLocations}")
+
+print(f"[SETUP] Setup OK. Battery: {battLev}%")
 
 #Functions
 def getPadCoordinates():
@@ -555,9 +574,9 @@ def main():
                 
             elif padInfo.get("id") == 2:
                 print(Fore.RESET + Fore.GREEN + "[PAD] Drone is at the End! Landing..." + Fore.RESET)
-                file = open(LOCATIONPATH, "a+")
-                file.write(f"\n")
-                file.write(str(specialLocations))
+                file = open(LOCATIONPATH, "wb")
+                pickle.dump(specialLocations, file)
+                #file.write(specialLocations)
                 file.close()
                 
                 nodedata["id"] = currpadCoords
@@ -576,19 +595,21 @@ def main():
                 pickle.dump(map, mapfile)
                 mapfile.close()
                 
-                mapdatafile = open(MAPDATAPATH, "w")
-                mapdatafile.write(str(mapdata))
+                mapdatafile = open(MAPDATAPATH, "wb")
+                pickle.dump(mapdata, mapdatafile)
+                #mapdatafile.write(str(mapdata))
                 mapdatafile.close()
                     
                 t.move_forward()
                 t.land()
                 inAir = False
             
-            else:
+            elif padInfo.get("id") > 2 and padInfo.get("id") < 6:
                 print("[PAD] Special Pad detected! Mission Pad")
                 specialLocations[currpadCoords] = padInfo.get("id") #Store as dictionary with node as identifier
                 print(f"[PAD] Special Locations Found: {specialLocations}")
-                
+                t.send_expansion_command("led bl 3 255 0 0 0 0 0")
+                time.sleep(1)
                 
         if walls[0] == False:
             branchforward = True
@@ -792,7 +813,7 @@ def main():
             
             subax1 = plt.subplot(221)  
             nx.draw(map, with_labels = True, font_weight='bold')
-            plt.show()
+            plt.show(block=False)
             
             #Connect to previous node + other connecting code
             #beenleft code (make it such that diff options add nodes with diff atrributes)
@@ -801,15 +822,60 @@ def main():
             pickle.dump(map, mapfile)
             mapfile.close()
             
-            mapdatafile = open(MAPDATAPATH, "w")
-            mapdatafile.write(str(mapdata))
+            mapdatafile = open(MAPDATAPATH, "wb")
+            pickle.dump(mapdata, mapdatafile)
+            #mapdatafile.write(str(mapdata))
             mapdatafile.close()
             
             currentmove += 1
             
     else:
-        #run already mapped code
+        #Identify if MissionPad!
+        if padInfo.get("type") == "missionpad":
+            if padInfo.get("id") == 1:
+                print(Fore.RESET + Fore.GREEN + "[PAD] Drone is at the Start." + Fore.RESET)
+                
+            elif padInfo.get("id") == 2:
+                print(Fore.RESET + Fore.GREEN + "[PAD] Drone is at the End! Landing..." + Fore.RESET)
+                file = open(LOCATIONPATH, "wb")
+                pickle.dump(specialLocations, file)
+                file.close()
+                
+                nodedata["id"] = currpadCoords
+                nodedata["type"] = "missionpad"
+                mapdata[nodedata["id"]] = nodedata #adding 
+                
+                print(Fore.RESET+Fore.GREEN+f"[MAP] Connecting node {previousnode} with node {currpadCoords}!"+Fore.RESET)
+                map.add_node(currpadCoords, type=nodedata["type"])
+                map.add_edge(previousnode, currpadCoords)
+                
+                subax1 = plt.subplot(221)  
+                nx.draw(map, with_labels = True, font_weight='bold')
+                plt.show(block=False)
+                
+                mapfile = open(MAPFILEPATH, 'wb')
+                pickle.dump(map, mapfile)
+                mapfile.close()
+                
+                mapdatafile = open(MAPDATAPATH, "wb")
+                pickle.dump(mapdata, mapdatafile)
+                #mapdatafile.write(str(mapdata))
+                mapdatafile.close()
+                    
+                t.move_forward()
+                t.land()
+                inAir = False
+            
+            elif padInfo.get("id") > 2 and padInfo.get("id") < 6:
+                print("[PAD] Special Pad detected! Mission Pad")
+                specialLocations[currpadCoords] = padInfo.get("id") #Store as dictionary with node as identifier
+                print(f"[PAD] Special Locations Found: {specialLocations}")
+                t.send_expansion_command('led bl 1 255 0 0 255 255 255')
+                time.sleep(0.5)
+                t.send_expansion_command('led 0 0 255')
         
+        #run already mapped code
+        print("[ERROR] ALREADY MAPPED!!!!! you died")
         nodedata = mapdata.get(currpadCoords)
         BLbranch = nodedata.get("bl")
         BRbranch = nodedata.get("br")
@@ -820,7 +886,7 @@ def main():
         nodeRightMoved = nodedata.get("rmove") #if it has been to right, True, else false
         nodeForwardMoved = nodedata.get("fmove")
         
-        #see graph paths? 
+        #see graph paths?
         
 mainRun = False 
 def run():
